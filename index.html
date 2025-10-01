@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Omni Technologies Weekly I&T Progress Report.1</title>
+  <title>Omni Technologies Weekly I&T Progress Report</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Google Fonts: Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -799,8 +799,9 @@
       hist.forEach(h => {
         const r = aoa.length + 1; // Get current row number for formula
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
+        const yr = parseInt(h.year, 10);
         aoa.push([
-          h.year || "",
+          Number.isFinite(yr) ? { t: 'n', v: yr } : { v: "" },
           toNum(h.bid),
           toNum(h.actual),
           { f: `IF(OR(${B}="",${C}="",${B}=0),"",(${C}-${B})/${B})` },
