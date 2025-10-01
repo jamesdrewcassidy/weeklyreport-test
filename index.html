@@ -775,10 +775,10 @@
     function buildInspectionSheet(item) {
       const rate = HOURLY_RATE || 25;
 
-      // Helper to coerce values to real numbers
+      // Helper to coerce values to real numbers, returning null for invalid ones
       const toNum = (v) => {
         const n = parseFloat(v);
-        return Number.isFinite(n) ? n : "";
+        return Number.isFinite(n) ? n : null;
       };
 
       const aoa = [
@@ -796,41 +796,38 @@
       const hist = Array.isArray(item.hoursHistory) ? [...item.hoursHistory] : [];
       hist.sort((a,b) => (parseInt(a.year)||0) - (parseInt(b.year)||0));
 
-      let startRow = 8; // This is the Excel row number of the headers
-      hist.forEach((h, idx) => {
-        const r = startRow + idx + 1; // Correct row number for formula
+      hist.forEach(h => {
+        const r = aoa.length + 1; // Get current row number for formula
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         aoa.push([
           h.year || "",
           toNum(h.bid),
           toNum(h.actual),
-          { f: `IFERROR((${C}-${B})/${B}, "")` },
+          { t:'n', f: `IFERROR((${C}-${B})/${B}, "")` },
           toNum(h.bidPrice),
-          { f: `IFERROR(${C}*$E$2, "")` },
-          { f: `IFERROR((${E}-${F}, "")` }
+          { t:'n', f: `IFERROR(${C}*$E$2, "")` },
+          { t:'n', f: `IFERROR((${E}-${F}, "")` }
         ]);
       });
 
       // Add 20 blank rows for future entries
       for (let i = 1; i <= 20; i++) {
-        const r = startRow + hist.length + i; // Correct row number for formula
+        const r = aoa.length + 1; // Get current row number for formula
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         aoa.push([
           "",
-          "",
-          "",
-          { f: `IFERROR((${C}-${B})/${B}, "")` },
-          "",
-          { f: `IFERROR(${C}*$E$2, "")` },
-          { f: `IFERROR((${E}-${F}, "")` }
+          null,
+          null,
+          { t:'n', f: `IFERROR((${C}-${B})/${B}, "")` },
+          null,
+          { t:'n', f: `IFERROR(${C}*$E$2, "")` },
+          { t:'n', f: `IFERROR((${E}-${F}, "")` }
         ]);
       }
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
 
       // ---- Formatting ----
-
-      // Numbers: currency/percent
       const range = XLSX.utils.decode_range(ws['!ref']);
       for (let R = 7; R <= range.e.r; R++) {
         const D = XLSX.utils.encode_cell({ r: R, c: 3 });
@@ -843,37 +840,31 @@
         if (ws[G]) ws[G].z = "$#,##0.00";
       }
 
-      // Title and header styling
       ws["A1"].s = { font: { bold: true, sz: 14 } };
       ["A2","A3","A4","A5","D2"].forEach(c => { if(ws[c]) ws[c].s = { font: { bold: true } }; });
-      ["A7","B7","C7","D7","E7","F7","G7"].forEach(c => { if(ws[c]) ws[c].s = { font: { bold: true } }; });
+      ["A8","B8","C8","D8","E8","F8","G8"].forEach(c => { 
+          const cell = XLSX.utils.encode_cell({r:7, c: ["A","B","C","D","E","F","G"].indexOf(c.charAt(0))});
+          if(ws[cell]) ws[cell].s = { font: { bold: true } }; 
+      });
 
-      // Notes: wide, wrapped, tall
       ws['!merges'] = ws['!merges'] || [];
-      ws['!merges'].push({ s: { r:4, c:1 }, e: { r:4, c:6 } }); // B5:G5 merged
+      ws['!merges'].push({ s: { r:4, c:1 }, e: { r:4, c:6 } });
       if (!ws['B5']) ws['B5'] = { t: 's', v: item.notes || "" };
-      ws['B5'].s = Object.assign({}, ws['B5'].s, { alignment: { wrapText: true, vertical: "top" } });
+      ws['B5'].s = { alignment: { wrapText: true, vertical: "top" } };
+      
       ws['!rows'] = ws['!rows'] || [];
-      ws['!rows'][4] = { hpt: 60 }; // taller for Notes
+      ws['!rows'][4] = { hpt: 60 };
 
-      // Column widths
       ws["!cols"] = [
-        { wch: 14 },   // Year
-        { wch: 12 },   // Bid Hrs
-        { wch: 12 },   // Actual Hrs
-        { wch: 10 },   // %
-        { wch: 14 },   // Bid Price
-        { wch: 14 },   // Actual Price
-        { wch: 14 }    // Gain/Loss
+        { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 10 },
+        { wch: 14 }, { wch: 14 }, { wch: 14 }
       ];
 
-      // Row heights for header rows
-      ws["!rows"][0] = { hpt: 22 };
-      ws["!rows"][1] = { hpt: 18 };
-      ws["!rows"][2] = { hpt: 18 };
-      ws["!rows"][3] = { hpt: 18 };
-
-      ws["!ref"] = XLSX.utils.encode_range({ s: { r:0, c:0 }, e: { r: aoa.length-1, c: 6 } });
+      ["!rows"][0] = { hpt: 22 };
+      ["!rows"][1] = { hpt: 18 };
+      ["!rows"][2] = { hpt: 18 };
+      ["!rows"][3] = { hpt: 18 };
+      
       return ws;
     }
     
