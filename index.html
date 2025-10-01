@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Omni Technologies Weekly I&T Progress Report</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- jsPDF, html2canvas and html2pdf (CDN versions) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <!-- SheetJS (for Excel export) -->
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <!-- External CSS file -->
+  <link rel="stylesheet" href="styles.css">
+  <!-- External JavaScript file -->
+  <script src="script.js" defer></script>
+</head>
+<body>
+
+<div class="page-container">
+  <!-- ========== TOP-LEVEL UI ELEMENTS (NOT IN PDF) ========== -->
+  <div class="top-actions no-pdf">
+    <button class="btn-primary" onclick="downloadPDF()">Download as PDF</button>
+    <button class="btn-success" onclick="downloadAllExcelFiles()">Download All as Excel</button>
+    <button class="btn-danger" onclick="clearAllData()">Clear All Data</button>
+  </div>
+
+  <div id="pdfContainer">
+    <!-- ========== PDF HEADER ========== -->
+    <div class="report-header">
+      <img src="https://i.imgur.com/M6L5W2p.png" alt="Omni Technologies Logo" class="report-logo">
+      <div class="report-header-text">
+        <h1>Inspection & Testing Weekly Progress Report</h1>
+        <p id="reportDateRange">For the week of MM/DD/YYYY to MM/DD/YYYY</p>
+      </div>
+    </div>
+
+    <!-- ========== DATE RANGE AND NOTES (NOT IN PDF) ========== -->
+    <div class="setup-section no-pdf">
+      <div class="date-range-picker">
+        <h2>Set Report Date Range</h2>
+        <div class="date-inputs">
+          <div>
+            <label for="startDate">Start Date:</label>
+            <input type="date" id="startDate" onchange="updateDateRange()">
+          </div>
+          <div>
+            <label for="endDate">End Date:</label>
+            <input type="date" id="endDate" onchange="updateDateRange()">
+          </div>
+        </div>
+      </div>
+      <div class="notes-section">
+        <h2>General Notes for Report</h2>
+        <textarea id="trendsNoticed" placeholder="Enter trends noticed or major wins..." oninput="saveNotes()"></textarea>
+        <textarea id="resourceChallenges" placeholder="Enter resource challenges or staffing issues..." oninput="saveNotes()"></textarea>
+        <textarea id="suggestedImprovements" placeholder="Enter suggested process improvements..." oninput="saveNotes()"></textarea>
+      </div>
+    </div>
+
+    <!-- ========== COMPLETED INSPECTIONS SECTION ========== -->
+    <div id="completedInspectionsSection">
+      <h2>Completed Inspections This Period</h2>
+      <div class="table-container">
+        <table id="completedTable">
+          <thead>
+            <tr>
+              <th>Site Name</th>
+              <th>Project #</th>
+              <th>Completed On</th>
+              <th>Info & History</th>
+              <th class="no-pdf">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="completedTableBody">
+            <!-- Rows will be dynamically inserted here -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ========== ONGOING INSPECTIONS SECTION ========== -->
+    <div id="ongoingInspectionsSection">
+      <h2>Ongoing Inspections</h2>
+      <div class="table-container">
+        <table id="ongoingTable">
+          <thead>
+            <tr>
+              <th>Site Name</th>
+              <th>Project #</th>
+              <th>Bid Hours</th>
+              <th>Hrs Worked</th>
+              <th>Est. Comp.</th>
+              <th class="no-pdf">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="ongoingTableBody">
+            <!-- Rows will be dynamically inserted here -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="disclaimer no-pdf">
+      Note: The "Completed" and "Ongoing" tables above will appear in the PDF. The forms below are for data entry only and will not be part of the downloaded report.
+    </p>
+  </div><!-- End of pdfContainer -->
+
+  <!-- ========== DATA ENTRY FORMS (NOT IN PDF) ========== -->
+  <div class="forms-container no-pdf">
+    <!-- Form for adding/editing a COMPLETED inspection -->
+    <div class="form-card">
+      <h3 id="completedFormTitle">Add New Completed Inspection</h3>
+      <form id="completedForm">
+        <input type="hidden" id="completedEntryId">
+        <div class="form-group">
+          <label for="completedSiteName">Company / Site Name</label>
+          <input type="text" id="completedSiteName" placeholder="e.g., Savanna Oaks Middle School" required>
+        </div>
+        <div class="form-group">
+          <label for="completedProjectNumber">Project Number</label>
+          <input type="text" id="completedProjectNumber" placeholder="e.g., 1001A" required>
+        </div>
+        <div class="form-group">
+          <label for="completedDate">Date Completed</label>
+          <input type="date" id="completedDate" required>
+        </div>
+        <div class="form-group">
+          <label for="completedBidHours">Bid Hours</label>
+          <input type="number" step="0.1" id="completedBidHours" placeholder="e.g., 19.5" required>
+        </div>
+        <div class="form-group">
+          <label for="completedActualHours">Actual Hours</label>
+          <input type="number" step="0.1" id="completedActualHours" placeholder="e.g., 16.5" required>
+        </div>
+         <div class="form-group">
+          <label for="completedBidPrice">Bid Price ($)</label>
+          <input type="number" step="0.01" id="completedBidPrice" placeholder="e.g., 1800.00" required>
+        </div>
+
+        <div class="form-group">
+            <label for="completedDiscrepancies">Field Notes (Discrepancies, Access Issues, etc.)</label>
+            <textarea id="completedDiscrepancies" placeholder="Any issues encountered on site..."></textarea>
+        </div>
+        <div class="form-group">
+            <label for="completedDeficiencies">Deficiencies Found</label>
+            <textarea id="completedDeficiencies" placeholder="List all deficiencies found..."></textarea>
+        </div>
+        <div class="form-group">
+            <label for="completedNotes">Contract/Quote Notes for Marty</label>
+            <textarea id="completedNotes" placeholder="Notes for quoting or contract adjustments..."></textarea>
+        </div>
+        <div class="form-group-checkbox">
+            <input type="checkbox" id="completedReportSent">
+            <label for="completedReportSent">Inspection Report Sent to Customer?</label>
+        </div>
+        
+        <h4>Historical Hours Data (Optional)</h4>
+        <div id="hoursHistoryContainer">
+            <!-- Historical year entries will be added here -->
+        </div>
+        <button type="button" class="btn-secondary" onclick="addHistoryYear()">+ Add Previous Year</button>
+        <hr style="margin: 20px 0;">
+        <button type="submit" class="submit-btn btn-success">Save Inspection</button>
+      </form>
+    </div>
+
+    <!-- Form for adding/editing an ONGOING inspection -->
+    <div class="form-card">
+      <h3 id="ongoingFormTitle">Add New Ongoing Inspection</h3>
+      <form id="ongoingForm">
+        <input type="hidden" id="ongoingEntryId">
+        <div class="form-group">
+          <label for="ongoingSiteName">Company / Site Name</label>
+          <input type="text" id="ongoingSiteName" placeholder="e.g., Verona High School" required>
+        </div>
+        <div class="form-group">
+          <label for="ongoingProjectNumber">Project Number</label>
+          <input type="text" id="ongoingProjectNumber" placeholder="e.g., 1002B" required>
+        </div>
+        <div class="form-group">
+          <label for="ongoingBidHours">Bid Hours</label>
+          <input type="number" step="0.1" id="ongoingBidHours" placeholder="e.g., 15" required />
+        </div>
+        <div class="form-group">
+          <label for="ongoingHoursWorked">Hours Worked So Far</label>
+          <input type="number" step="0.1" id="ongoingHoursWorked" placeholder="e.g., 7.5" required />
+        </div>
+        <div class="form-group">
+          <label for="ongoingEstCompletion">Estimated Completion Date</label>
+          <input type="date" id="ongoingEstCompletion" required />
+        </div>
+        <div class="form-group">
+          <label for="ongoingNotes">Notes</label>
+          <textarea id="ongoingNotes" placeholder="Enter detailed notes here..."></textarea>
+        </div>
+        <button type="submit" class="submit-btn btn-success">Save Inspection</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Confirmation Modal -->
+  <div id="confirmModal" class="modal">
+    <div class="modal-content" style="max-width: 450px;">
+      <h3 id="confirmModalTitle" style="color: var(--primary-color);">Confirmation</h3>
+      <p id="confirmModalText" style="margin: 20px 0; font-size: 1.1rem;"></p>
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button id="confirmCancelBtn" class="btn-secondary">Cancel</button>
+        <button id="confirmOkBtn" class="btn-danger">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
