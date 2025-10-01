@@ -796,9 +796,9 @@
       const hist = Array.isArray(item.hoursHistory) ? [...item.hoursHistory] : [];
       hist.sort((a,b) => (parseInt(a.year)||0) - (parseInt(b.year)||0));
 
-      let startRow = 8;
+      let startRow = 8; // This is the Excel row number of the headers
       hist.forEach((h, idx) => {
-        const r = startRow + idx;
+        const r = startRow + idx + 1; // Correct row number for formula
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         aoa.push([
           h.year || "",
@@ -807,13 +807,13 @@
           { f: `IFERROR((${C}-${B})/${B}, "")` },
           toNum(h.bidPrice),
           { f: `IFERROR(${C}*$E$2, "")` },
-          { f: `IFERROR(${E}-${F}, "")` }
+          { f: `IFERROR((${E}-${F}, "")` }
         ]);
       });
 
       // Add 20 blank rows for future entries
       for (let i = 1; i <= 20; i++) {
-        const r = startRow + hist.length + i - 1;
+        const r = startRow + hist.length + i; // Correct row number for formula
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         aoa.push([
           "",
@@ -822,7 +822,7 @@
           { f: `IFERROR((${C}-${B})/${B}, "")` },
           "",
           { f: `IFERROR(${C}*$E$2, "")` },
-          { f: `IFERROR(${E}-${F}, "")` }
+          { f: `IFERROR((${E}-${F}, "")` }
         ]);
       }
 
@@ -1430,3 +1430,4 @@
 </script>
 </body>
 </html>
+
