@@ -620,7 +620,7 @@
         
         let table = '<table class="history-table"><thead><tr><th>Year</th><th>Bid Hrs</th><th>Actual Hrs</th><th>+/- %</th><th>Bid Price</th><th>Actual Price</th><th>Gain/Loss</th></tr></thead><tbody>';
         
-        [...history].sort((a,b) => b.year - a.year).forEach(h => {
+        [...history].sort((a,b) => (parseInt(a.year)||0) - (parseInt(b.year)||0)).forEach(h => {
             const ou = calculateOverUnder(h.bid, h.actual);
             const bidPrice = parseFloat(h.bidPrice) || 0;
             const actualPrice = (parseFloat(h.actual) || 0) * HOURLY_RATE;
@@ -893,9 +893,9 @@
         new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
           .format(Number.isFinite(+n) ? +n : 0);
 
-      // prepare rows (sorted DESC by year)
+      // prepare rows (sorted ASC by year)
       const rows = (Array.isArray(item.hoursHistory) ? [...item.hoursHistory] : [])
-        .sort((a, b) => parseInt(b.year) - parseInt(a.year));
+        .sort((a, b) => (parseInt(a.year)||0) - (parseInt(b.year)||0));
 
       const safe = {
         proj: escapeHTML(item.projectNumber || ""),
@@ -1118,10 +1118,9 @@
             const empty = el('#histTable tbody tr[data-empty="1"]');
             if (empty) empty.remove();
 
-            const y = maxYear() + 1; // suggest NEXT year by default
             const tr = document.createElement("tr");
             tr.innerHTML = \`
-              <td data-col="year" contenteditable="true">\${y}</td>
+              <td data-col="year" contenteditable="true"></td>
               <td data-col="bid" contenteditable="true"></td>
               <td data-col="actual" contenteditable="true"></td>
               <td data-col="pct">N/A</td>
@@ -1129,7 +1128,7 @@
               <td data-col="actualPrice">\${fmtMoney(0)}</td>
               <td data-col="gainLoss" class="text-gain">\${fmtMoney(0)}</td>
               <td class="tools"><button data-action="deleteRow" title="Delete row">✕</button></td>\`;
-            tbl.prepend(tr);
+            tbl.append(tr); // add at bottom
             recalcRow(tr);
           }
 
@@ -1274,44 +1273,26 @@
         const historyBody = document.getElementById('hourHistoryBody');
         historyBody.innerHTML = '';
         if (item.hoursHistory && item.hoursHistory.length > 0) {
-            [...item.hoursHistory].sort((a,b) => b.year - a.year).forEach(h => addHourHistoryRow(h.year, h.bid, h.actual, h.bidPrice));
+            [...item.hoursHistory]
+              .sort((a,b) => (parseInt(a.year)||0) - (parseInt(b.year)||0))
+              .forEach(h => addHourHistoryRow(h.year, h.bid, h.actual, h.bidPrice));
         } else {
             addHourHistoryRow();
         }
     }
 
     function addHourHistoryRow(year = '', bid = '', actual = '', bidPrice = '') {
-        const tbody = document.getElementById('hourHistoryBody');
-        let nextYear = year;
+      const tbody = document.getElementById('hourHistoryBody');
 
-        // FIX #2: Correctly calculate the next year when adding a new row.
-        if (year === '') {
-            const rows = tbody.querySelectorAll('tr');
-            if (rows.length > 0) {
-                // Get the year from the top-most row (most recent year)
-                const lastYearInput = rows[0].querySelector('.history-year');
-                const lastYear = parseInt(lastYearInput.value, 10);
-                if (!isNaN(lastYear)) {
-                    // Decrement from the last year
-                    nextYear = lastYear - 1;
-                } else {
-                    // Fallback if the input is empty or invalid
-                    nextYear = new Date().getFullYear(); 
-                }
-            } else {
-                // If no rows exist, default to the current year
-                nextYear = new Date().getFullYear(); 
-            }
-        }
-        
-        const row = tbody.insertRow(0); // Insert at the top
-        row.innerHTML = `
-            <td><input type="number" class="history-year" placeholder="YYYY" value="${nextYear}" required></td>
-            <td><input type="number" step="0.1" class="history-bid" placeholder="e.g. 40" value="${bid}" required></td>
-            <td><input type="number" step="0.1" class="history-actual" placeholder="e.g. 42.5" value="${actual}" required></td>
-            <td><input type="number" step="0.01" class="history-bid-price" placeholder="e.g. 1200.00" value="${bidPrice}"></td>
-            <td class="no-pdf"><button type="button" class="btn-danger" style="padding:4px 8px;" onclick="this.closest('tr').remove()">X</button></td>
-        `;
+      // No automatic year suggestions; leave blank unless provided.
+      const row = tbody.insertRow(-1); // append at bottom
+      row.innerHTML = `
+          <td><input type="number" class="history-year" placeholder="YYYY" value="${year}" required></td>
+          <td><input type="number" step="0.1" class="history-bid" placeholder="e.g. 40" value="${bid}" required></td>
+          <td><input type="number" step="0.1" class="history-actual" placeholder="e.g. 42.5" value="${actual}" required></td>
+          <td><input type="number" step="0.01" class="history-bid-price" placeholder="e.g. 1200.00" value="${bidPrice}"></td>
+          <td class="no-pdf"><button type="button" class="btn-danger" style="padding:4px 8px;" onclick="this.closest('tr').remove()">X</button></td>
+      `;
     }
 
     /* ======================
