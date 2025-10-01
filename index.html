@@ -1029,7 +1029,7 @@
 const EXCEL_HOURLY_RATE = typeof HOURLY_RATE === 'number' ? HOURLY_RATE : 25;
 
 /* ========= SMALL UTILS ========= */
-function toCurrencyFmt(num){ return { numFmt: '"$"#,##0.00;[Red]\\-"$"#,##0.00' }; }
+function toCurrencyFmt(){ return { numFmt: '"$"#,##0.00;[Red]-"$"#,##0.00' }; }
 function toPercentFmt(){ return { numFmt: '0.0%;[Red]-0.0%' }; }
 function toNumber1(){ return { numFmt: '0.0' }; }
 function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
@@ -1059,18 +1059,19 @@ async function buildCompanyWorkbook({ companyName, rows }) {
     { header: 'Gain / Loss ($)', key: 'gain', width: 16 },
   ];
 
-  // Title block
-  ws.mergeCells('A1:G1');
-  ws.getCell('A1').value = `${companyName} — History & Summary`;
-  ws.getCell('A1').font = { bold: true, size: 16 };
-  ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
-  ws.getRow(1).height = 24;
+// Title block (wider merge + wrap so long company names never clip)
+ws.mergeCells('A1:K1'); // was A1:G1
+ws.getCell('A1').value = `${companyName}\nHistory & Summary`; // make it 2 lines instead of a long single line
+ws.getCell('A1').font = { bold: true, size: 16 };
+ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+ws.getRow(1).height = 34; // was 24
 
-  // Meta row
-  ws.mergeCells('A2:D2');
-  ws.getCell('A2').value = `Generated: ${todayISO()} • Hourly Rate: $${EXCEL_HOURLY_RATE}/hr`;
-  ws.getCell('A2').font = { color:{ argb:'FF555555' } };
-  ws.getCell('A2').alignment = { vertical:'middle' };
+// Meta row (wider merge to match the title width)
+ws.mergeCells('A2:K2'); // was A2:D2
+ws.getCell('A2').value = `Generated: ${todayISO()} • Hourly Rate: $${EXCEL_HOURLY_RATE}/hr`;
+ws.getCell('A2').font = { color:{ argb:'FF555555' } };
+ws.getCell('A2').alignment = { vertical:'middle' };
+
 
   // Header styling (row 4)
   ws.addRow(); // row 3 spacer
