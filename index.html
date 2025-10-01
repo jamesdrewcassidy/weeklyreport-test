@@ -1013,5 +1013,302 @@
     window.onload = initialize;
 
 </script>
+  <!-- =======================================================================
+  Excel export feature (drop this block near the end of your HTML, after the
+  existing <script> that defines renderCompletedTable / initialize).
+  Depends on: ExcelJS + FileSaver + JSZip (all CDN, no build step).
+  :contentReference[oaicite:0]{index=0}
+======================================================================= -->
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<script>
+/* ========= CONFIG ========= */
+const EXCEL_HOURLY_RATE = typeof HOURLY_RATE === 'number' ? HOURLY_RATE : 25;
+
+/* ========= SMALL UTILS ========= */
+function toCurrencyFmt(num){ return { numFmt: '"$"#,##0.00;[Red]\\-"$"#,##0.00' }; }
+function toPercentFmt(){ return { numFmt: '0.0%;[Red]-0.0%' }; }
+function toNumber1(){ return { numFmt: '0.0' }; }
+function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function sanitizeName(s){ return String(s || 'Company').replace(/[\\/:*?"<>|]/g,'_').slice(0,60); }
+function getCompletedData(){ try { return JSON.parse(localStorage.getItem(LS_COMPLETED_KEY) || '[]'); } catch{ return []; } }
+
+/* ========= CORE: BUILD A ONE-PAGE "HISTORY & SUMMARY" WORKSHEET =========
+   This generates a single worksheet that combines the "Summary" and "History"
+   concepts into one easy-to-read page. It uses formulas for +/-%, Actual Price,
+   and Gain/Loss. It intentionally avoids separate Notes and extra sheets. */
+async function buildCompanyWorkbook({ companyName, rows }) {
+  const wb = new ExcelJS.Workbook();
+  wb.created = new Date();
+  const ws = wb.addWorksheet('History & Summary', {
+    properties: { defaultRowHeight: 18 },
+    pageSetup: { paperSize: 1, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins:{ left:.3, right:.3, top:.4, bottom:.4 } }
+  });
+
+  // Column setup
+  ws.columns = [
+    { header: 'Year',          key: 'year', width: 10 },
+    { header: 'Bid Hours',     key: 'bid',  width: 12 },
+    { header: 'Actual Hours',  key: 'act',  width: 13 },
+    { header: '+/- %',         key: 'pct',  width: 9 },
+    { header: 'Bid Price ($)', key: 'bidp', width: 14 },
+    { header: 'Actual Price ($)', key: 'actp', width: 16 },
+    { header: 'Gain / Loss ($)', key: 'gain', width: 16 },
+  ];
+
+  // Title block
+  ws.mergeCells('A1:G1');
+  ws.getCell('A1').value = `${companyName} — History & Summary`;
+  ws.getCell('A1').font = { bold: true, size: 16 };
+  ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
+  ws.getRow(1).height = 24;
+
+  // Meta row
+  ws.mergeCells('A2:D2');
+  ws.getCell('A2').value = `Generated: ${todayISO()} • Hourly Rate: $${EXCEL_HOURLY_RATE}/hr`;
+  ws.getCell('A2').font = { color:{ argb:'FF555555' } };
+  ws.getCell('A2').alignment = { vertical:'middle' };
+
+  // Header styling (row 4)
+  ws.addRow(); // row 3 spacer
+  const headerRow = ws.addRow(ws.columns.map(c => c.header));
+  headerRow.eachCell((c) => {
+    c.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFEFF3F6' } };
+    c.font = { bold:true };
+    c.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
+    c.alignment = { vertical:'middle', horizontal:'center' };
+  });
+
+  // Sort by Year descending (newest first)
+  const sorted = [...rows].sort((a,b)=>Number(b.year)-Number(a.year));
+
+  // Data rows start at row 5
+  const startDataRow = ws.rowCount + 1;
+  sorted.forEach(r => {
+    const added = ws.addRow([
+      Number(r.year),
+      Number(r.bid) || 0,
+      Number(r.actual) || 0,
+      null, // +/- %
+      Number(r.bidPrice) || 0,
+      null, // Actual Price
+      null  // Gain/Loss
+    ]);
+    added.eachCell((c, colNumber) => {
+      c.border = { top:{style:'hair'}, left:{style:'thin'}, bottom:{style:'hair'}, right:{style:'thin'} };
+      if (colNumber === 2 || colNumber === 3) c.numFmt = toNumber1().numFmt;
+      if (colNumber === 5 || colNumber === 6 || colNumber === 7) c.numFmt = toCurrencyFmt().numFmt;
+      if (colNumber === 1) c.alignment = { horizontal:'center' };
+    });
+  });
+  const endDataRow = ws.rowCount;
+
+  // Inject formulas for +/- %, Actual Price, Gain/Loss
+  for (let r = startDataRow; r <= endDataRow; r++){
+    // Percent = (Actual - Bid) / Bid
+    ws.getCell(`D${r}`).value = { formula: `IFERROR((C${r}-B${r})/B${r},0)`, date1904:false };
+    ws.getCell(`D${r}`).numFmt = toPercentFmt().numFmt;
+
+    // Actual Price = Actual * HourlyRate (put HourlyRate in hidden cell H2)
+    ws.getCell(`F${r}`).value = { formula: `C${r}*$H$2`, date1904:false };
+    ws.getCell(`F${r}`).numFmt = toCurrencyFmt().numFmt;
+
+    // Gain/Loss = Bid Price - Actual Price
+    ws.getCell(`G${r}`).value = { formula: `E${r}-F${r}`, date1904:false };
+    ws.getCell(`G${r}`).numFmt = toCurrencyFmt().numFmt;
+  }
+
+  // Hourly Rate anchor (hidden)
+  ws.getCell('H2').value = EXCEL_HOURLY_RATE;
+  ws.getColumn('H').hidden = true;
+
+  // Totals / summary block
+  ws.addRow(); // spacer
+  const totalsRowIdx = ws.rowCount + 1;
+
+  ws.mergeCells(`A${totalsRowIdx}:C${totalsRowIdx}`);
+  ws.getCell(`A${totalsRowIdx}`).value = 'Summary (across all years shown)';
+  ws.getCell(`A${totalsRowIdx}`).font = { bold:true };
+  ws.getCell(`A${totalsRowIdx}`).fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FFF7F7F7' } };
+  ws.getCell(`A${totalsRowIdx}`).border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
+
+  ws.getCell(`D${totalsRowIdx}`).value = 'Totals:';
+  ws.getCell(`D${totalsRowIdx}`).font = { bold:true };
+  ws.getCell(`E${totalsRowIdx}`).value = { formula: `SUM(E${startDataRow}:E${endDataRow})` };
+  ws.getCell(`E${totalsRowIdx}`).numFmt = toCurrencyFmt().numFmt;
+
+  ws.getCell(`F${totalsRowIdx}`).value = { formula: `SUM(F${startDataRow}:F${endDataRow})` };
+  ws.getCell(`F${totalsRowIdx}`).numFmt = toCurrencyFmt().numFmt;
+
+  ws.getCell(`G${totalsRowIdx}`).value = { formula: `SUM(G${startDataRow}:G${endDataRow})` };
+  ws.getCell(`G${totalsRowIdx}`).numFmt = toCurrencyFmt().numFmt;
+
+  // Avg Over/Under %
+  const avgRowIdx = totalsRowIdx + 1;
+  ws.mergeCells(`A${avgRowIdx}:C${avgRowIdx}`);
+  ws.getCell(`A${avgRowIdx}`).value = 'Average Over/Under %';
+  ws.getCell(`A${avgRowIdx}`).font = { bold:true };
+  ws.getCell(`D${avgRowIdx}`).value = { formula: `AVERAGE(D${startDataRow}:D${endDataRow})` };
+  ws.getCell(`D${avgRowIdx}`).numFmt = toPercentFmt().numFmt;
+
+  // "Visuals" with data bars using REPT — simple, no chart objects (keeps one page & pure XLSX)
+  const vizHeaderIdx = avgRowIdx + 2;
+  ws.getCell(`A${vizHeaderIdx}`).value = 'Quick Visuals (text bars)';
+  ws.getCell(`A${vizHeaderIdx}`).font = { bold:true };
+
+  // Scale helpers in hidden cells (I and J)
+  ws.getCell('I2').value = { formula: `MAX(C${startDataRow}:C${endDataRow})` }; // max hours
+  ws.getCell('J2').value = { formula: `MAX(F${startDataRow}:F${endDataRow})` }; // max actual $
+  ws.getColumn('I').hidden = true; ws.getColumn('J').hidden = true;
+
+  const vizStart = vizHeaderIdx + 1;
+  ws.getCell(`A${vizStart}`).value = 'Hours (relative)';
+  ws.getCell(`B${vizStart}`).value = 'Actual $ (relative)';
+  ws.getRow(vizStart).font = { bold:true };
+
+  // For each data line, create a text bar with REPT("█", normalized*30)
+  const bars = Math.max(10, Math.min(40, sorted.length * 4)); // dynamic width 10..40
+  for (let r = 0; r < (endDataRow - startDataRow + 1); r++){
+    const line = vizStart + 1 + r;
+    const dataRow = startDataRow + r;
+    ws.getCell(`A${line}`).value = { formula: `TEXT(C${dataRow},"0.0")&"  "&REPT("█",ROUND(IF($I$2=0,0,(C${dataRow}/$I$2))*${bars},0))` };
+    ws.getCell(`B${line}`).value = { formula: `TEXT(F${dataRow},"$#,##0")&"  "&REPT("█",ROUND(IF($J$2=0,0,(F${dataRow}/$J$2))*${bars},0))` };
+    ws.getCell(`A${line}`).font = { name:'Consolas' };
+    ws.getCell(`B${line}`).font = { name:'Consolas' };
+  }
+
+  // Borders around the data table
+  for (let r = startDataRow - 1; r <= endDataRow; r++){
+    for (let c = 1; c <= 7; c++){
+      const cell = ws.getCell(r, c);
+      cell.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
+    }
+  }
+
+  // Freeze headers
+  ws.views = [{ state:'frozen', xSplit:0, ySplit:4 }];
+
+  return wb;
+}
+
+/* ========= PER-INSPECTION EXPORT =========
+   Creates a workbook for a single completed inspection (years in its hour history). */
+async function exportInspectionExcel(completedItem) {
+  const rows = (completedItem.hoursHistory || []).map(h => ({
+    year: h.year, bid: h.bid, actual: h.actual, bidPrice: h.bidPrice
+  }));
+  if (!rows.length){
+    alert('No hour history for this inspection yet.');
+    return;
+  }
+  const companyName = sanitizeName(completedItem.siteName || completedItem.projectNumber || 'Company');
+  const wb = await buildCompanyWorkbook({ companyName, rows });
+  const buf = await wb.xlsx.writeBuffer();
+  saveAs(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+         `${companyName}_History_${todayISO()}.xlsx`);
+}
+
+/* ========= "DOWNLOAD ALL" (ONE FILE PER COMPANY) =========
+   Groups completed inspections by Site Name (acts as "company") and produces
+   one Excel per company. A ZIP is generated so the user gets separate files. */
+async function exportAllCompaniesZip() {
+  const completed = getCompletedData();
+  if (!completed.length){ alert('No completed inspections to export.'); return; }
+
+  // group by company (Site Name)
+  const byCompany = new Map();
+  for (const item of completed){
+    const key = sanitizeName(item.siteName || item.projectNumber || 'Company');
+    const arr = byCompany.get(key) || [];
+    (item.hoursHistory || []).forEach(h => {
+      arr.push({ year: h.year, bid: h.bid, actual: h.actual, bidPrice: h.bidPrice });
+    });
+    byCompany.set(key, arr);
+  }
+
+  const zip = new JSZip();
+  for (const [company, rows] of byCompany){
+    if (!rows.length) continue;
+    const wb = await buildCompanyWorkbook({ companyName: company, rows });
+    const buf = await wb.xlsx.writeBuffer();
+    zip.file(`${company}_History_${todayISO()}.xlsx`, buf);
+  }
+
+  const zipContent = await zip.generateAsync({ type: 'blob' });
+  saveAs(zipContent, `Company_Excel_Exports_${todayISO()}.zip`);
+}
+
+/* ========= UI INTEGRATION (NON-BREAKING) =========
+   - Adds a "Download Excel" button beside each completed inspection row.
+   - Adds a "Download All (ZIP)" button in the top actions.
+   This wraps the existing renderCompletedTable() to re-attach buttons after rerenders. */
+(function attachExcelUI(){
+  if (typeof renderCompletedTable !== 'function') return;
+
+  // Add "Download All" button once
+  function ensureTopButton(){
+    const top = document.querySelector('.top-actions');
+    if (!top || top.querySelector('#btnExportAllExcel')) return;
+    const b = document.createElement('button');
+    b.className = 'btn-success';
+    b.id = 'btnExportAllExcel';
+    b.textContent = 'Download All Excel (ZIP)';
+    b.title = 'One Excel per company in a single ZIP';
+    b.addEventListener('click', exportAllCompaniesZip);
+    top.insertBefore(b, top.firstChild);
+  }
+
+  function addRowButtons(){
+    const tbody = document.querySelector('#completedTable tbody');
+    if (!tbody) return;
+
+    const completed = getCompletedData();
+    const byId = new Map(completed.map(x => [x.id, x]));
+
+    // Iterate each main row (those with data-id)
+    tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+      const id = tr.getAttribute('data-id');
+      const data = byId.get(id);
+      if (!data) return;
+
+      // Actions cell = last cell of this row (has the edit/delete)
+      const actionsCell = tr.cells[2];
+      if (!actionsCell) return;
+
+      // If button already added for this row, skip
+      if (actionsCell.querySelector('.btn-download-excel')) return;
+
+      const btn = document.createElement('button');
+      btn.className = 'btn-primary btn-download-excel';
+      btn.style.cssText = 'width:100%; margin-top:6px;';
+      btn.textContent = 'Download Excel';
+      btn.addEventListener('click', () => exportInspectionExcel(data));
+      actionsCell.appendChild(btn);
+    });
+  }
+
+  // Wrap the existing function so buttons persist after any re-render
+  const _renderCompletedTable = renderCompletedTable;
+  renderCompletedTable = function(){
+    _renderCompletedTable();
+    ensureTopButton();
+    addRowButtons();
+  };
+
+  // On initial load, try to place buttons (in case render ran already)
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    ensureTopButton();
+    addRowButtons();
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      ensureTopButton();
+      addRowButtons();
+    });
+  }
+})();
+</script>
 </body>
 </html>
