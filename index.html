@@ -775,6 +775,12 @@
     /* ========= Build one worksheet with clean layout & totals ========= */
     function buildInspectionSheet(item) {
       const rate = HOURLY_RATE || 25;
+      
+      // Coerce numeric-looking values to real numbers; otherwise return ""
+      const toNum = (v) => {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : "";
+      };
 
       const aoa = [
         ["Inspection Summary"],
@@ -797,10 +803,10 @@
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         aoa.push([
           h.year || "",
-          h.bid ?? "",
-          h.actual ?? "",
+          toNum(h.bid),
+          toNum(h.actual),
           { f: `IFERROR((${C}-${B})/${B}, "")` },  // +/- %
-          h.bidPrice ?? "",
+          toNum(h.bidPrice),
           { f: `IFERROR(${C}*$E$2, "")` },        // Actual Price
           { f: `IFERROR(${E}-${F}, "")` }         // Gain/Loss
         ]);
@@ -820,20 +826,6 @@
           { f: `IFERROR(${E}-${F}, "")` }
         ]);
       }
-
-      // Add Totals/Averages row
-      const lastDataRow = startRow + hist.length + 20 - 1;
-      const totalRow = lastDataRow + 2;
-      aoa.push([]);
-      aoa.push([
-        "Totals / Averages",
-        { f: `SUM(B9:B${lastDataRow})` },             // Sum Bid Hrs
-        { f: `SUM(C9:C${lastDataRow})` },             // Sum Actual Hrs
-        { f: `IFERROR((C${totalRow}-B${totalRow})/B${totalRow}, "")` }, // % diff from totals
-        { f: `SUM(E9:E${lastDataRow})` },             // Sum Bid Price
-        { f: `SUM(F9:F${lastDataRow})` },             // Sum Actual Price
-        { f: `SUM(G9:G${lastDataRow})` }              // Sum Gain/Loss
-      ]);
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
 
