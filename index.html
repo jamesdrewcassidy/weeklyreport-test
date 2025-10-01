@@ -780,8 +780,8 @@
         ["Inspection Summary"],
         ["Project #", item.projectNumber || "", "", "Rate/hr", rate],
         ["Site Name", item.siteName || ""],
-        // Spread "Date Completed" across A & B for neatness
         ["Date Completed", formatDate(parseLocalDate(item.dateCompleted)) || "", ""],
+        ["Notes", item.notes || ""],
         [],
         [],
         ["Year","Bid Hrs","Actual Hrs","+/- %","Bid Price","Actual Price","Gain/Loss"]
@@ -791,7 +791,7 @@
       const hist = Array.isArray(item.hoursHistory) ? [...item.hoursHistory] : [];
       hist.sort((a,b) => (parseInt(b.year)||0) - (parseInt(a.year)||0));
 
-      let startRow = 8;
+      let startRow = 9; // Data starts on row 9
       hist.forEach((h, idx) => {
         const r = startRow + idx;
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
@@ -827,19 +827,26 @@
       aoa.push([]);
       aoa.push([
         "Totals / Averages",
-        { f: `SUM(B8:B${lastDataRow})` },             // Sum Bid Hrs
-        { f: `SUM(C8:C${lastDataRow})` },             // Sum Actual Hrs
+        { f: `SUM(B9:B${lastDataRow})` },             // Sum Bid Hrs
+        { f: `SUM(C9:C${lastDataRow})` },             // Sum Actual Hrs
         { f: `IFERROR((C${totalRow}-B${totalRow})/B${totalRow}, "")` }, // % diff from totals
-        { f: `SUM(E8:E${lastDataRow})` },             // Sum Bid Price
-        { f: `SUM(F8:F${lastDataRow})` },             // Sum Actual Price
-        { f: `SUM(G8:G${lastDataRow})` }              // Sum Gain/Loss
+        { f: `SUM(E9:E${lastDataRow})` },             // Sum Bid Price
+        { f: `SUM(F9:F${lastDataRow})` },             // Sum Actual Price
+        { f: `SUM(G9:G${lastDataRow})` }              // Sum Gain/Loss
       ]);
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
 
+      // Make Notes row (row 5) bigger, span across columns, and wrap text
+      const notesCellRef = 'B5';
+      if (!ws[notesCellRef]) ws[notesCellRef] = { t: 's', v: item.notes || "" };
+      ws[notesCellRef].s = { alignment: { wrapText: true, vertical: "top" } };
+      ws['!merges'] = ws['!merges'] || [];
+      ws['!merges'].push({ s: { r: 4, c: 1 }, e: { r: 4, c: 6 } }); // Merge B5:G5
+
       // Number formats
       const range = XLSX.utils.decode_range(ws['!ref']);
-      for (let R = 7; R <= range.e.r; R++) {
+      for (let R = 8; R <= range.e.r; R++) { // Start from data row
         const D = XLSX.utils.encode_cell({ r: R, c: 3 });
         const E = XLSX.utils.encode_cell({ r: R, c: 4 });
         const F = XLSX.utils.encode_cell({ r: R, c: 5 });
@@ -852,8 +859,8 @@
 
       // Professional look
       ws["A1"].s = { font: { bold: true, sz: 14 } };
-      ["A2","A3","A4","D2"].forEach(c => { if(ws[c]) ws[c].s = { font: { bold: true } }; });
-      ["A7","B7","C7","D7","E7","F7","G7"].forEach(c => { if(ws[c]) ws[c].s = { font: { bold: true } }; });
+      ["A2","A3","A4","A5","D2"].forEach(c => { if(ws[c]) ws[c].s = { font: { bold: true } }; });
+      ["A8","B8","C8","D8","E8","F8","G8"].forEach(c => { if(ws[c]) ws[c].s = { font: { bold: true } }; });
 
       // Column widths
       ws["!cols"] = [
@@ -866,8 +873,14 @@
         { wch: 14 }    // Gain/Loss
       ];
 
-      // Row heights for header
-      ws["!rows"] = [{ hpt: 22 }, { hpt: 18 }, { hpt: 18 }, { hpt: 18 }];
+      // Row heights for header and notes
+      ws["!rows"] = [
+          { hpt: 22 }, // Row 1
+          { hpt: 18 }, // Row 2
+          { hpt: 18 }, // Row 3
+          { hpt: 18 }, // Row 4
+          { hpt: 60 }  // Row 5 (Notes)
+      ];
 
       ws["!ref"] = XLSX.utils.encode_range({ s: { r:0, c:0 }, e: { r: aoa.length-1, c: 6 } });
       return ws;
