@@ -820,12 +820,16 @@
         const act  = escapeHTML(h.actual || "");
         const bidPrice = Number(h.bidPrice) || 0;
         const actualPrice = (Number(h.actual) || 0) * HOURLY_RATE;
-        const pct = (() => {
-          const b = parseFloat(h.bid), a = parseFloat(h.actual);
-          if (!isFinite(b) || !isFinite(a) || b === 0) return "N/A";
+        
+        const b = parseFloat(h.bid), a = parseFloat(h.actual);
+        let pct = "N/A";
+        let pctClass = "";
+        if (isFinite(b) && isFinite(a) && b !== 0) {
           const diff = ((a - b) / b) * 100;
-          return `${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`;
-        })();
+          pct = `${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`;
+          pctClass = diff > 0 ? "text-loss" : "text-gain";
+        }
+        
         const gainLoss = bidPrice - actualPrice;
         const glClass = gainLoss >= 0 ? "text-gain" : "text-loss";
 
@@ -834,7 +838,7 @@
             <td data-col="year">${year}</td>
             <td data-col="bid">${bid}</td>
             <td data-col="actual">${act}</td>
-            <td data-col="pct">${pct}</td>
+            <td data-col="pct" class="${pctClass}">${pct}</td>
             <td data-col="bidPrice">${fmtMoney(bidPrice)}</td>
             <td data-col="actualPrice">${fmtMoney(actualPrice)}</td>
             <td data-col="gainLoss" class="${glClass}">${fmtMoney(gainLoss)}</td>
@@ -987,8 +991,11 @@
             if (Number.isFinite(bid) && Number.isFinite(actual) && bid !== 0) {
               const diff = ((actual - bid) / bid) * 100;
               pctCell.textContent = (diff > 0 ? "+" : "") + diff.toFixed(1) + "%";
+              pctCell.classList.toggle("text-loss", diff > 0);
+              pctCell.classList.toggle("text-gain", diff <= 0);
             } else {
               pctCell.textContent = "N/A";
+              pctCell.classList.remove("text-loss","text-gain");
             }
             actualPriceCell.textContent = fmtMoney(ap);
 
