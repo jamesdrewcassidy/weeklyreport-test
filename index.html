@@ -781,96 +781,308 @@
       a.remove();
     }
     
-    /* ========= Single inspection Summary (clean one-page HTML) =========
-       Includes: Project #, Site Name, Date Completed, Financial & Hour History, Notes
-       Omits: Discrepancies, Deficiencies, Report Sent (per request)
-    */
     function buildCompletedSummaryHTML(item) {
-      const dateCompleted = item.dateCompleted ? formatDate(parseLocalDate(item.dateCompleted)) : '';
+      const HOURLY_RATE = 25;
+
+      // helpers used both at build-time and in the exported page
+      const escapeHTML = (str) =>
+        (str || "").toString()
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+
+      const fmtMoney = (n) =>
+        new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+          .format(Number.isFinite(+n) ? +n : 0);
+
+      // prepare rows (sorted DESC by year)
       const rows = (Array.isArray(item.hoursHistory) ? [...item.hoursHistory] : [])
-        .sort((a,b) => parseInt(b.year) - parseInt(a.year))
-        .map(h => {
-          const ou = calculateOverUnder(h.bid, h.actual); // your existing helper returns {text, className}
-          const bidPrice = parseFloat(h.bidPrice) || 0;
-          const actualPrice = (parseFloat(h.actual) || 0) * HOURLY_RATE; // your constant
-          const gainLoss = bidPrice - actualPrice;
-          return `
-            <tr>
-              <td>${escapeHTML(h.year || '')}</td>
-              <td>${escapeHTML(h.bid || '')}</td>
-              <td>${escapeHTML(h.actual || '')}</td>
-              <td class="${ou.className}">${ou.text}</td>
-              <td>${formatCurrency(bidPrice)}</td>
-              <td>${formatCurrency(actualPrice)}</td>
-              <td class="${gainLoss >= 0 ? 'text-gain' : 'text-loss'}">${formatCurrency(gainLoss)}</td>
-            </tr>`;
-        }).join('');
+        .sort((a, b) => parseInt(b.year) - parseInt(a.year));
 
-      // Clean, printer-friendly styles—self-contained so it looks consistent anywhere
-      const css = `
-        :root { --primary:#c8102e; --ink:#222; --ink-light:#666; --gain:#138a36; --loss:#c8102e; }
-        *{box-sizing:border-box}
-        body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;color:var(--ink);background:#fff}
-        h1{font-size:22px;margin:0 0 12px 0}
-        h2{font-size:16px;margin:20px 0 8px 0;color:var(--ink)}
-        .card{border:1px solid #eee;border-radius:10px;padding:16px;margin-bottom:14px}
-        .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-        .label{color:var(--ink-light)}
-        table{width:100%;border-collapse:collapse;font-size:14px}
-        th,td{border:1px solid #e6e6e6;padding:8px;text-align:left;vertical-align:top}
-        th{background:#f6f6f6}
-        .text-gain{color:var(--gain);font-weight:600}
-        .text-loss{color:var(--loss);font-weight:600}
-        .muted{color:var(--ink-light);font-size:12px;margin-top:6px}
-        .notes{white-space:pre-wrap;line-height:1.35}
-      `;
+      const safe = {
+        proj: escapeHTML(item.projectNumber || ""),
+        site: escapeHTML(item.siteName || ""),
+        date: escapeHTML((() => {
+          if (!item.dateCompleted) return "";
+          const [y, m, d] = item.dateCompleted.split("-").map(Number);
+          if (!y || !m || !d) return "";
+          return `${String(m).toString().padStart(2, "0")}/${String(d).padStart(2, "0")}/${y}`;
+        })()),
+        notes: escapeHTML(item.notes || "")
+      };
 
+      // Build table body HTML (plain text values; editing will be contentEditable in the exported page)
+      const bodyRows = rows.map((h) => {
+        const year = escapeHTML(h.year || "");
+        const bid  = escapeHTML(h.bid  || "");
+        const act  = escapeHTML(h.actual || "");
+        const bidPrice = Number(h.bidPrice) || 0;
+        const actualPrice = (Number(h.actual) || 0) * HOURLY_RATE;
+        const pct = (() => {
+          const b = parseFloat(h.bid), a = parseFloat(h.actual);
+          if (!isFinite(b) || !isFinite(a) || b === 0) return "N/A";
+          const diff = ((a - b) / b) * 100;
+          return `${diff > 0 ? "+" : ""}${diff.toFixed(1)}%`;
+        })();
+        const gainLoss = bidPrice - actualPrice;
+        const glClass = gainLoss >= 0 ? "text-gain" : "text-loss";
+
+        return `
+          <tr>
+            <td data-col="year">${year}</td>
+            <td data-col="bid">${bid}</td>
+            <td data-col="actual">${act}</td>
+            <td data-col="pct">${pct}</td>
+            <td data-col="bidPrice">${fmtMoney(bidPrice)}</td>
+            <td data-col="actualPrice">${fmtMoney(actualPrice)}</td>
+            <td data-col="gainLoss" class="${glClass}">${fmtMoney(gainLoss)}</td>
+            <td class="tools" aria-hidden="true"><button data-action="deleteRow" title="Delete row">✕</button></td>
+          </tr>`;
+      }).join("");
+
+      // --- Standalone, editable, re-savable HTML ---
       return `<!doctype html>
     <html>
     <head>
       <meta charset="utf-8">
-      <title>${escapeHTML(item.siteName || '')} – ${escapeHTML(item.projectNumber || '')} Summary</title>
+      <title>${safe.site} – ${safe.proj} Summary</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <style>${css}</style>
+      <style>
+        :root { --primary:#c8102e; --ink:#222; --ink-light:#666; --gain:#138a36; --loss:#c8102e; --bd:#e6e6e6; --bg:#fff; --muted:#f6f6f6; }
+        *{box-sizing:border-box}
+        html,body{height:100%}
+        body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;color:var(--ink);background:var(--bg)}
+        h1{font-size:22px;margin:0 0 12px 0}
+        h2{font-size:16px;margin:20px 0 8px 0;color:var(--ink)}
+        .row{display:flex;gap:12px;flex-wrap:wrap}
+        .grow{flex:1 1 200px}
+        .card{border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px;background:#fff}
+        label{font-size:12px;color:var(--ink-light);display:block;margin-bottom:6px}
+        .field{padding:8px;border:1px dashed transparent;border-radius:8px;min-height:24px}
+        .field[contenteditable="true"]{border-color:#cfd5db;background:#fafbfd}
+        table{width:100%;border-collapse:collapse;font-size:14px}
+        th,td{border:1px solid var(--bd);padding:8px;text-align:left;vertical-align:top}
+        th{background:var(--muted)}
+        td.tools{width:42px;text-align:center}
+        button{cursor:pointer;border:1px solid var(--bd);background:#fff;border-radius:8px;padding:8px 12px}
+        button:hover{background:#f8f8f8}
+        .btn-primary{border-color:var(--primary)}
+        .btn-danger{color:#fff;background:var(--loss);border-color:var(--loss)}
+        .btn-danger:hover{filter:brightness(0.98)}
+        .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+        .text-gain{color:var(--gain);font-weight:600}
+        .text-loss{color:var(--loss);font-weight:600}
+        .muted{color:var(--ink-light);font-size:12px;margin-top:6px}
+        .notes{white-space:pre-wrap;line-height:1.35}
+        .hide-when-view{display:none}
+        .editing .hide-when-view{display:inline-flex}
+        .editing td[contenteditable], .editing .field{border-color:#cfd5db;background:#fafbfd}
+        .editing td.tools{display:table-cell}
+        td.tools{display:none}
+        /* narrow view */
+        @media (max-width:640px){ td:nth-child(1){min-width:76px} }
+      </style>
     </head>
     <body>
+      <div class="card toolbar">
+        <button id="toggleEdit" class="btn-primary" aria-pressed="false">Enter Edit Mode</button>
+        <button id="addYear" class="hide-when-view">Add Year</button>
+        <button id="saveHtml" class="btn-primary hide-when-view">Save Updated HTML</button>
+        <button id="printPdf" class="hide-when-view">Print</button>
+        <span class="muted" style="align-self:center">Open → Edit → Save Updated HTML to archive changes.</span>
+      </div>
+
       <h1>Inspection Summary</h1>
 
       <div class="card">
-        <div class="grid">
-          <div><div class="label">Project #</div><div>${escapeHTML(item.projectNumber || '')}</div></div>
-          <div><div class="label">Site Name</div><div>${escapeHTML(item.siteName || '')}</div></div>
-          <div><div class="label">Date Completed</div><div>${escapeHTML(dateCompleted)}</div></div>
+        <div class="row">
+          <div class="grow">
+            <label>Project #</label>
+            <div id="fldProject" class="field" contenteditable="false">${safe.proj}</div>
+          </div>
+          <div class="grow">
+            <label>Site Name</label>
+            <div id="fldSite" class="field" contenteditable="false">${safe.site}</div>
+          </div>
+          <div class="grow">
+            <label>Date Completed</label>
+            <div id="fldDate" class="field" contenteditable="false">${safe.date}</div>
+          </div>
         </div>
       </div>
 
       <div class="card">
         <h2>Financial & Hour History</h2>
         <div class="muted">(Actual price calculated at $${HOURLY_RATE}/hr)</div>
-        <table>
+        <table id="histTable" aria-label="Financial & Hour History">
           <thead>
             <tr>
               <th>Year</th><th>Bid Hrs</th><th>Actual Hrs</th><th>+/- %</th>
-              <th>Bid Price</th><th>Actual Price</th><th>Gain/Loss</th>
+              <th>Bid Price</th><th>Actual Price</th><th>Gain/Loss</th><th class="tools"> </th>
             </tr>
           </thead>
           <tbody>
-            ${rows || `<tr><td colspan="7" class="muted">No hour history recorded.</td></tr>`}
+            ${bodyRows || `<tr data-empty="1"><td colspan="8" class="muted">No hour history recorded.</td></tr>`}
           </tbody>
         </table>
       </div>
 
-      ${item.notes ? `
+      ${safe.notes ? `
       <div class="card">
         <h2>Notes</h2>
-        <div class="notes">${escapeHTML(item.notes)}</div>
-      </div>` : ''}
+        <div id="fldNotes" class="field notes" contenteditable="false">${safe.notes}</div>
+      </div>` : `
+      <div class="card">
+        <h2>Notes</h2>
+        <div id="fldNotes" class="field notes" contenteditable="false"></div>
+      </div>`}
 
+      <script>
+        (function(){
+          const HOURLY_RATE = ${HOURLY_RATE};
+          const el = (s, r=document) => r.querySelector(s);
+          const els = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+          const fmtMoney = (n) => new Intl.NumberFormat("en-US", {style:"currency",currency:"USD"}).format(+n||0);
+          const toNum = (v) => {
+            const n = parseFloat(String(v).replace(/[^0-9.\\-]/g,""));
+            return Number.isFinite(n) ? n : NaN;
+          };
+
+          const root = document.body;
+          const tbl = el("#histTable tbody");
+          const toggleBtn = el("#toggleEdit");
+          const addBtn = el("#addYear");
+          const saveBtn = el("#saveHtml");
+          const printBtn = el("#printPdf");
+
+          function isEditing(){ return root.classList.contains("editing"); }
+          function setEditing(on){
+            root.classList.toggle("editing", !!on);
+            const editable = !!on;
+            ["#fldProject","#fldSite","#fldDate","#fldNotes"].forEach(sel => {
+              const f = el(sel);
+              if (f) f.setAttribute("contenteditable", String(editable));
+            });
+            els("#histTable tbody td[data-col]").forEach(td => td.setAttribute("contenteditable", String(editable)));
+            toggleBtn.textContent = on ? "Exit Edit Mode" : "Enter Edit Mode";
+            toggleBtn.setAttribute("aria-pressed", on ? "true" : "false");
+          }
+
+          function recalcRow(tr){
+            const get = (k) => el('[data-col="'+k+'"]', tr);
+            const bid = toNum(get("bid")?.textContent);
+            const actual = toNum(get("actual")?.textContent);
+            const bidPriceCell = get("bidPrice");
+            const actualPriceCell = get("actualPrice");
+            const pctCell = get("pct");
+            const glCell = get("gainLoss");
+
+            const bidPrice = toNum(get("bidPrice")?.textContent);
+            const bp = Number.isFinite(bidPrice) ? bidPrice : 0; // allow manual override
+            const ap = (Number.isFinite(actual) ? actual : 0) * HOURLY_RATE;
+
+            if (Number.isFinite(bid) && Number.isFinite(actual) && bid !== 0) {
+              const diff = ((actual - bid) / bid) * 100;
+              pctCell.textContent = (diff > 0 ? "+" : "") + diff.toFixed(1) + "%";
+            } else {
+              pctCell.textContent = "N/A";
+            }
+            actualPriceCell.textContent = fmtMoney(ap);
+
+            const gainLoss = bp - ap;
+            glCell.textContent = fmtMoney(gainLoss);
+            glCell.classList.toggle("text-gain", gainLoss >= 0);
+            glCell.classList.toggle("text-loss", gainLoss < 0);
+          }
+
+          function recalcAll(){
+            els("#histTable tbody tr").forEach(tr => {
+              if (tr.hasAttribute("data-empty")) return;
+              recalcRow(tr);
+            });
+          }
+
+          function maxYear(){
+            const ys = els('#histTable tbody td[data-col="year"]').map(td => parseInt(td.textContent,10)).filter(n => Number.isFinite(n));
+            return ys.length ? Math.max(...ys) : (new Date()).getFullYear();
+          }
+
+          function addYearRow(){
+            // remove placeholder if present
+            const empty = el('#histTable tbody tr[data-empty="1"]');
+            if (empty) empty.remove();
+
+            const y = maxYear() + 1; // suggest NEXT year by default
+            const tr = document.createElement("tr");
+            tr.innerHTML = \`
+              <td data-col="year" contenteditable="true">\${y}</td>
+              <td data-col="bid" contenteditable="true"></td>
+              <td data-col="actual" contenteditable="true"></td>
+              <td data-col="pct">N/A</td>
+              <td data-col="bidPrice" contenteditable="true"></td>
+              <td data-col="actualPrice">\${fmtMoney(0)}</td>
+              <td data-col="gainLoss" class="text-gain">\${fmtMoney(0)}</td>
+              <td class="tools"><button data-action="deleteRow" title="Delete row">✕</button></td>\`;
+            tbl.prepend(tr);
+            recalcRow(tr);
+          }
+
+          function onTableInput(e){
+            if (!isEditing()) return;
+            const td = e.target.closest("td[data-col]");
+            if (!td) return;
+            const tr = td.parentElement;
+            recalcRow(tr);
+          }
+
+          function onTableClick(e){
+            if (!isEditing()) return;
+            const btn = e.target.closest("button[data-action='deleteRow']");
+            if (btn){
+              btn.closest("tr")?.remove();
+            }
+          }
+
+          function downloadString(filename, text){
+            const blob = new Blob([text], {type:"text/html;charset=utf-8"});
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(a.href);
+            a.remove();
+          }
+
+          function saveUpdatedHTML(){
+            // Ensure we are in view mode to lock current edits into attributes/DOM
+            setEditing(false);
+            const html = "<!doctype html>\\n" + document.documentElement.outerHTML;
+            const site = (el("#fldSite")?.textContent || "Site").replace(/[^a-z0-9_\\-]+/gi, "_");
+            const proj = (el("#fldProject")?.textContent || "Project").replace(/[^a-z0-9_\\-]+/gi, "_");
+            downloadString(site + "_" + proj + "_Summary_Updated.html", html);
+          }
+
+          // wire up UI
+          toggleBtn.addEventListener("click", () => setEditing(!isEditing()));
+          addBtn.addEventListener("click", addYearRow);
+          saveBtn.addEventListener("click", saveUpdatedHTML);
+          printBtn.addEventListener("click", () => window.print());
+          tbl.addEventListener("input", onTableInput);
+          tbl.addEventListener("click", onTableClick);
+
+          // start in view mode
+          setEditing(false);
+        })();
+      </script>
     </body>
     </html>`;
     }
 
-    /* ======================
+    //* ======================
        Generic Modal & Data Helpers
        ====================== */
     function openModal(modalId, focusElementId) {
