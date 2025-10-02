@@ -759,9 +759,7 @@
       if (!completed.length) return;
 
       completed.forEach(item => {
-        const wb = XLSX.utils.book_new();
-        const ws = buildInspectionSheet(item);
-        XLSX.utils.book_append_sheet(wb, ws, "Summary");
+        const wb = buildInspectionSheet(item);
 
         // Sanitize filename (sitename_Hours_Summary.xlsx)
         let safeSite = (item.siteName || "Site").replace(/[^A-Za-z0-9 _-]/g, "");
@@ -773,6 +771,7 @@
     }
     
     function buildInspectionSheet(item) {
+      const wb = XLSX.utils.book_new();
       const rate = HOURLY_RATE || 25;
 
       // Helper to coerce values to real numbers, returning null for invalid ones
@@ -797,92 +796,98 @@
       hist.sort((a,b) => (parseInt(a.year)||0) - (parseInt(b.year)||0));
 
       hist.forEach(h => {
-        const r = aoa.length + 1; // Get current row number for formula
-        const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         const yr = parseInt(h.year, 10);
         aoa.push([
-          Number.isFinite(yr) ? { t: 'n', v: yr } : { v: "" },
+          Number.isFinite(yr) ? yr : "",
           toNum(h.bid),
           toNum(h.actual),
-          { f: `IF(OR(${B}="",${C}="",${B}=0),"",(${C}-${B})/${B})` },
+          null, // Placeholder for formula link
           toNum(h.bidPrice),
-          { f: `IF(${C}="", "", ${C}*$E$2)` },
-          { f: `IF(OR(${E}="", ${F}=""), "", ${E}-${F})` }
+          null, // Placeholder for formula link
+          null  // Placeholder for formula link
         ]);
       });
 
       // Add 20 blank rows for future entries
       for (let i = 1; i <= 20; i++) {
-        const r = aoa.length + 1; // Get current row number for formula
-        const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         aoa.push([
-          { v: "" },
-          null,
-          null,
-          { f: `IF(OR(${B}="",${C}="",${B}=0),"",(${C}-${B})/${B})` },
-          null,
-          { f: `IF(${C}="", "", ${C}*$E$2)` },
-          { f: `IF(OR(${E}="", ${F}=""), "", ${E}-${F})` }
+          "", null, null, null, null, null, null
         ]);
       }
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       
-      // --- PROTECT FORMULAS + KEEP INPUTS EDITABLE ---
-      // Helper to mark cells locked/unlocked
-      function setCellLock(addr, locked) {
-        if (!ws[addr]) ws[addr] = { t: 's', v: '' };
-        ws[addr].s = ws[addr].s || {};
-        ws[addr].s.protection = ws[addr].s.protection || {};
-        ws[addr].s.protection.locked = !!locked; // true = locked, false = unlocked
-      }
-      // Helper to apply to a rectangular range like A1:G20
-      function setRangeLock(rangeA1, locked) {
-        const r = XLSX.utils.decode_range(rangeA1);
-        for (let R = r.s.r; R <= r.e.r; R++) {
-          for (let C = r.s.c; C <= r.e.c; C++) {
-            const addr = XLSX.utils.encode_cell({ r: R, c: C });
-            setCellLock(addr, locked);
-          }
-        }
-      }
-      // Determine the used range
+      // --- TWO SHEET LOGIC ---
+      const ENTRY_SHEET_NAME = "Summary";
+      const DATA_SHEET_NAME  = "Data";
+      const firstDataRow = 9; // header is row 8
+      const COL = { A:0, B:1, C:2, D:3, E:4, F:5, G:6 };
+      
+      ws['!ref'] = ws['!ref'] || "A1";
       const used = XLSX.utils.decode_range(ws['!ref']);
-      // 1) Lock everything by default
-      setRangeLock(ws['!ref'], true);
-      // 2) Unlock user-entry areas
-      // Notes cell (merged area begins at B5)
-      setCellLock('B5', false);
-      // Data-entry columns start on row 9 (header row is 8)
-      // A = Year, B = Bid Hrs, C = Actual Hrs, E = Bid Price
-      const firstDataRow = 9;
-      const lastDataRow  = used.e.r + 1; // A1-style row number
-      setRangeLock(`A${firstDataRow}:A${lastDataRow}`, false);
-      setRangeLock(`B${firstDataRow}:B${lastDataRow}`, false);
-      setRangeLock(`C${firstDataRow}:C${lastDataRow}`, false);
-      setRangeLock(`E${firstDataRow}:E${lastDataRow}`, false);
-      // 3) Keep formula columns locked (D, F, G) and headers/title locked (already covered)
-      // 4) Optionally lock the Rate cell so users can’t change the $/hr
-      setCellLock('E2', true);
-      // 5) Turn on sheet protection (set your own password)
-      ws['!protect'] = {
-        password: "ChangeThisPassword!",   // <-- pick a real password
-        selectLockedCells: false,
-        selectUnlockedCells: true,
-        formatCells: false,
-        formatColumns: false,
-        formatRows: false,
-        insertColumns: false,
-        insertRows: false,
-        insertHyperlinks: false,
-        deleteColumns: false,
-        deleteRows: false,
-        sort: false,
-        autoFilter: false,
-        pivotTables: false,
-        objects: true,
-        scenarios: false
-      };
+      const lastDataRow = used.e.r + 1;
+      
+      XLSX.utils.book_append_sheet(wb, ws, ENTRY_SHEET_NAME);
+      
+      const dataAOA = [];
+      for (let r = 0; r <= used.e.r; r++) {
+        dataAOA[r] = [];
+        for (let c = 0; c <= used.e.c; c++) dataAOA[r][c] = "";
+      }
+      dataAOA[7] = ["Year", "Bid Hrs", "Actual Hrs", "+/- %", "Bid Price", "Actual Price", "Gain/Loss"];
+      
+      for (let r = firstDataRow; r <= lastDataRow; r++) {
+          const entryB = `${ENTRY_SHEET_NAME}!B${r}`;
+          const entryC = `${ENTRY_SHEET_NAME}!C${r}`;
+          const entryE = `${ENTRY_SHEET_NAME}!E${r}`;
+          const rateCell = `${ENTRY_SHEET_NAME}!$E$2`;
+          const dataF = `F${r}`;
+
+          dataAOA[r-1] = dataAOA[r-1] || [];
+          dataAOA[r-1][COL.D] = { f: `IF(OR(${entryB}="",${entryC}="",${entryB}=0),"",(${entryC}-${entryB})/${entryB})` };
+          dataAOA[r-1][COL.F] = { f: `IF(${entryC}="", "", ${entryC}*${rateCell})` };
+          dataAOA[r-1][COL.G] = { f: `IF(OR(${entryE}="", ${dataF}=""), "", ${entryE}-${dataF})` };
+      }
+
+      const wsData = XLSX.utils.aoa_to_sheet(dataAOA);
+      wsData['!protect'] = { password: "ChangeThisPassword!", selectLockedCells: false, selectUnlockedCells: false };
+      XLSX.utils.book_append_sheet(wb, wsData, DATA_SHEET_NAME);
+      
+      wb.Workbook = wb.Workbook || {};
+      wb.Workbook.Sheets = wb.Workbook.Sheets || [];
+      wb.SheetNames.forEach((name, idx) => {
+        wb.Workbook.Sheets[idx] = wb.Workbook.Sheets[idx] || {};
+        if (name === DATA_SHEET_NAME) wb.Workbook.Sheets[idx].Hidden = 2;
+      });
+
+      for (let r = firstDataRow; r <= lastDataRow; r++) {
+        const addrD = `D${r}`, addrF = `F${r}`, addrG = `G${r}`;
+        ws[addrD] = { f: `=${DATA_SHEET_NAME}!D${r}` };
+        ws[addrF] = { f: `=${DATA_SHEET_NAME}!F${r}` };
+        ws[addrG] = { f: `=${DATA_SHEET_NAME}!G${r}` };
+      }
+      
+      function setLock(sheet, addr, locked){
+        if (!sheet[addr] && locked) return; // Can't lock a non-existent cell
+        if (!sheet[addr]) sheet[addr] = {t:'s', v:''};
+        sheet[addr].s = sheet[addr].s || {};
+        sheet[addr].s.protection = sheet[addr].s.protection || {};
+        sheet[addr].s.protection.locked = !!locked;
+      }
+
+      for (let R = 0; R <= used.e.r; R++){
+          for(let C = 0; C <= used.e.c; C++){
+              const addr = XLSX.utils.encode_cell({r:R, c:C});
+              setLock(ws, addr, true);
+          }
+      }
+
+      for (let r = firstDataRow; r <= lastDataRow; r++) {
+        ['A','B','C','E'].forEach(col => setLock(ws, `${col}${r}`, false));
+      }
+      setLock(ws, 'B5', false);
+
+      ws['!protect'] = { password: "ChangeThisPassword!", selectLockedCells: false, selectUnlockedCells: true };
 
 
       // ---- Formatting ----
@@ -923,7 +928,7 @@
       ["!rows"][2] = { hpt: 18 };
       ["!rows"][3] = { hpt: 18 };
       
-      return ws;
+      return wb;
     }
     
     function buildCompletedSummaryHTML(item) {
