@@ -816,7 +816,7 @@
         const r = aoa.length + 1; // Get current row number for formula
         const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
         aoa.push([
-          "",
+          { v: "" },
           null,
           null,
           { f: `IF(OR(${B}="",${C}="",${B}=0),"",(${C}-${B})/${B})` },
@@ -827,6 +827,63 @@
       }
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
+      
+      // --- PROTECT FORMULAS + KEEP INPUTS EDITABLE ---
+      // Helper to mark cells locked/unlocked
+      function setCellLock(addr, locked) {
+        if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+        ws[addr].s = ws[addr].s || {};
+        ws[addr].s.protection = ws[addr].s.protection || {};
+        ws[addr].s.protection.locked = !!locked; // true = locked, false = unlocked
+      }
+      // Helper to apply to a rectangular range like A1:G20
+      function setRangeLock(rangeA1, locked) {
+        const r = XLSX.utils.decode_range(rangeA1);
+        for (let R = r.s.r; R <= r.e.r; R++) {
+          for (let C = r.s.c; C <= r.e.c; C++) {
+            const addr = XLSX.utils.encode_cell({ r: R, c: C });
+            setCellLock(addr, locked);
+          }
+        }
+      }
+      // Determine the used range
+      const used = XLSX.utils.decode_range(ws['!ref']);
+      // 1) Lock everything by default
+      setRangeLock(ws['!ref'], true);
+      // 2) Unlock user-entry areas
+      // Notes cell (merged area begins at B5)
+      setCellLock('B5', false);
+      // Data-entry columns start on row 9 (header row is 8)
+      // A = Year, B = Bid Hrs, C = Actual Hrs, E = Bid Price
+      const firstDataRow = 9;
+      const lastDataRow  = used.e.r + 1; // A1-style row number
+      setRangeLock(`A${firstDataRow}:A${lastDataRow}`, false);
+      setRangeLock(`B${firstDataRow}:B${lastDataRow}`, false);
+      setRangeLock(`C${firstDataRow}:C${lastDataRow}`, false);
+      setRangeLock(`E${firstDataRow}:E${lastDataRow}`, false);
+      // 3) Keep formula columns locked (D, F, G) and headers/title locked (already covered)
+      // 4) Optionally lock the Rate cell so users can’t change the $/hr
+      setCellLock('E2', true);
+      // 5) Turn on sheet protection (set your own password)
+      ws['!protect'] = {
+        password: "ChangeThisPassword!",   // <-- pick a real password
+        selectLockedCells: false,
+        selectUnlockedCells: true,
+        formatCells: false,
+        formatColumns: false,
+        formatRows: false,
+        insertColumns: false,
+        insertRows: false,
+        insertHyperlinks: false,
+        deleteColumns: false,
+        deleteRows: false,
+        sort: false,
+        autoFilter: false,
+        pivotTables: false,
+        objects: true,
+        scenarios: false
+      };
+
 
       // ---- Formatting ----
       const range = XLSX.utils.decode_range(ws['!ref']);
