@@ -911,21 +911,22 @@
 
   // Protect sheet (no password). Users can edit unlocked cells immediately.
   await ws.protect("", {
-    selectLockedCells: true,
-    selectUnlockedCells: true,
-    formatCells: false,
-    formatColumns: false,
-    formatRows: false,
-    insertColumns: false,
-    insertRows: false,
-    insertHyperlinks: false,
-    deleteColumns: false,
-    deleteRows: false,
-    sort: false,
-    autoFilter: false,
-    pivotTables: false
-    // password: "yourPassword" // optional
-  });
+  selectLockedCells: true,
+  selectUnlockedCells: true,
+  formatCells: false,
+  formatColumns: false,
+  formatRows: false,
+  insertColumns: false,
+  insertRows: false,
+  insertHyperlinks: false,
+  deleteColumns: false,
+  deleteRows: false,
+  sort: false,
+  autoFilter: false,
+  pivotTables: false,
+  editScenarios: true,   // <— add these
+  editObjects: true      // <— add these
+});
 }
     
     function buildCompletedSummaryHTML(item) {
