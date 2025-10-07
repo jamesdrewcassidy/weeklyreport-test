@@ -783,7 +783,7 @@
   }
 }
     
-    async function buildInspectionSheet(item, wb) {
+async function buildInspectionSheet(item, wb) {
   const rate = (typeof HOURLY_RATE !== 'undefined' && HOURLY_RATE != null) ? HOURLY_RATE : 25;
   const ws = wb.addWorksheet("Summary");
 
@@ -812,12 +812,13 @@
       Number.isFinite(parseInt(h.year,10)) ? parseInt(h.year,10) : "",
       toNum(h.bid),
       toNum(h.actual),
-      null, // calc below
+      null, // D formula
       toNum(h.bidPrice),
-      null, // calc below
-      null  // calc below
+      null, // F formula
+      null  // G formula
     ]);
   }
+
   // 20 blank input rows for future entries
   for (let i=0;i<20;i++){
     rows.push(["", null, null, null, null, null, null]);
@@ -848,14 +849,14 @@
     { key:"G", width:14 }
   ];
 
-  // Fill formulas + number formats starting at row 9 (header is row 8)
+  // ====== FORMULAS + NUMBER FORMATS ======
   const lastRow = ws.rowCount;
   for (let r=9; r<=lastRow; r++){
     const B = ws.getCell(`B${r}`), C = ws.getCell(`C${r}`),
           D = ws.getCell(`D${r}`), E = ws.getCell(`E${r}`),
           F = ws.getCell(`F${r}`), G = ws.getCell(`G${r}`);
 
-    // D: percent delta
+    // D: % delta
     D.value = { formula: `IF(OR(${B.address}="",${C.address}="",${B.address}=0),"",(${C.address}-${B.address})/${B.address})` };
     // F: Actual Price = Actual Hrs * $E$2 (Rate/hr)
     F.value = { formula: `IF(${C.address}="", "", ${C.address}*$E$2)` };
@@ -869,7 +870,7 @@
     G.numFmt = '$#,##0.00';
   }
 
-  // ====== CONDITIONAL FORMATTING (before protection) ======
+  // ====== CONDITIONAL FORMATTING (kept as-is) ======
   // D9:D29 — >0 red, <0 green
   ws.addConditionalFormatting({
     ref: "D9:D29",
@@ -887,47 +888,31 @@
     ]
   });
 
-  // ====== PROTECTION + UNLOCK SPECIFIC RANGES ======
-  function unlockRange(a1){
-    const m = a1.match(/^([A-Z]+)(\\d+):([A-Z]+)(\\d+)$/i);
-    if (!m) { ws.getCell(a1).protection = { locked: false }; return; }
-    const [_, c1, r1, c2, r2] = m;
-    const colStart = columnToNumber(c1);
-    const colEnd   = columnToNumber(c2);
-    for (let R=+r1; R<=+r2; R++){
-      for (let C=colStart; C<=colEnd; C++){
-        ws.getCell(numberToColumn(C)+R).protection = { locked: false };
-      }
-    }
-  }
-  function columnToNumber(col){ let n=0; for (let i=0;i<col.length;i++){ n = n*26 + (col.charCodeAt(i)-64); } return n; }
-  function numberToColumn(num){ let s=""; while(num>0){ const r=(num-1)%26; s=String.fromCharCode(65+r)+s; num=Math.floor((num-1)/26); } return s; }
+  // ====== DATA VALIDATION “LOCK” (no sheet protection needed) ======
+  // Block edits (typing/clearing) in formula columns D, F, G across all used rows.
+  // This prevents backspacing or overwriting formulas, while leaving other cells editable.
+  const stopRule = {
+    type: "custom",
+    allowBlank: true,
+    formulae: ["FALSE"],           // always false -> any input is rejected
+    showErrorMessage: true,
+    errorStyle: "stop",
+    errorTitle: "Protected Formula",
+    error: "This cell is calculated. Please edit input cells instead."
+  };
 
-  // Your editable areas:
-  unlockRange("A9:C31");
-  unlockRange("E9:E33");
-  ws.getCell("B2").protection = { locked: false };
-  unlockRange("B3:G5");
+  ws.dataValidations.add(`D9:D${lastRow}`, stopRule);
+  ws.dataValidations.add(`F9:F${lastRow}`, stopRule);
+  ws.dataValidations.add(`G9:G${lastRow}`, stopRule);
 
-  // Protect sheet (no password). Users can edit unlocked cells immediately.
-  await ws.protect("", {
-  selectLockedCells: true,
-  selectUnlockedCells: true,
-  formatCells: false,
-  formatColumns: false,
-  formatRows: false,
-  insertColumns: false,
-  insertRows: false,
-  insertHyperlinks: false,
-  deleteColumns: false,
-  deleteRows: false,
-  sort: false,
-  autoFilter: false,
-  pivotTables: false,
-  editScenarios: true,   // <— add these
-  editObjects: true      // <— add these
-});
+  // If you also want to stop edits in header labels, uncomment:
+  // ws.dataValidations.add("A1:G8", stopRule);
+
+  // No worksheet protection call here (so no 'protected sheet' banner).
+  // Your intended editable ranges remain freely editable:
+  // - A9:C31, E9:E33, B2, B3:G5 (and anything else you want).
 }
+
     
     function buildCompletedSummaryHTML(item) {
       const HOURLY_RATE = 25;
