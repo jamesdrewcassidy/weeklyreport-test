@@ -15,6 +15,7 @@
   <!-- JSZip for ZIP functionality -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <style>
     /* ========== GLOBAL RESET & BODY ========== */
     :root {
@@ -754,169 +755,162 @@
     }
     
     /* ========= EACH COMPLETED → OWN EXCEL FILE ========= */
-    function downloadAllExcelFiles() {
-      const completed = JSON.parse(localStorage.getItem(LS_COMPLETED_KEY) || '[]');
-      if (!completed.length) return;
+    async function downloadAllExcelFiles() {
+  const completed = JSON.parse(localStorage.getItem(LS_COMPLETED_KEY) || '[]');
+  if (!completed.length) return;
 
-      completed.forEach(item => {
-        const wb = XLSX.utils.book_new();
-        const ws = buildInspectionSheet(item);
-        XLSX.utils.book_append_sheet(wb, ws, "Summary");
+  for (const item of completed) {
+    const wb = new ExcelJS.Workbook();
+    await buildInspectionSheet(item, wb);
 
-        // Sanitize filename (sitename_Hours_Summary.xlsx)
-        let safeSite = (item.siteName || "Site").replace(/[^A-Za-z0-9 _-]/g, "");
-        if (!safeSite.trim()) safeSite = "Site";
-        const filename = `${safeSite}_Hours_Summary.xlsx`;
+    // Sanitize filename (sitename_Hours_Summary.xlsx)
+    let safeSite = (item.siteName || "Site").replace(/[^A-Za-z0-9 _-]/g, "");
+    if (!safeSite.trim()) safeSite = "Site";
+    const filename = `${safeSite}_Hours_Summary.xlsx`;
 
-        XLSX.writeFile(wb, filename);
-      });
-    }
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(url);
+    a.remove();
+  }
+}
     
-    function buildInspectionSheet(item) {
-  const rate = HOURLY_RATE || 25;
-
-  // Helper to coerce values to real numbers, returning null for invalid ones
-  const toNum = (v) => {
-    const n = parseFloat(v);
-    return Number.isFinite(n) ? n : null;
-  };
+    async function buildInspectionSheet(item, wb) {
+  const rate = (typeof HOURLY_RATE !== 'undefined' && HOURLY_RATE != null) ? HOURLY_RATE : 25;
+  const ws = wb.addWorksheet("Summary");
 
   // ====== DATA BUILD ======
-  const aoa = [
+  const rows = [
     ["Inspection Summary"],
     ["Project #", item.projectNumber || "", "", "Rate/hr", rate],
     ["Site Name", item.siteName || ""],
-    ["Date Completed", formatDate(parseLocalDate(item.dateCompleted)) || "", ""],
+    ["Date Completed", (item.dateCompleted || ""), ""],
     ["Notes", item.notes || ""],
     [],
     [],
     ["Year","Bid Hrs","Actual Hrs","+/- %","Bid Price","Actual Price","Gain/Loss"]
   ];
 
-  // Sort years oldest → newest
   const hist = Array.isArray(item.hoursHistory) ? [...item.hoursHistory] : [];
   hist.sort((a,b) => (parseInt(a.year)||0) - (parseInt(b.year)||0));
 
-  hist.forEach(h => {
-    const r = aoa.length + 1; // current row number (1-based for Excel A1 references)
-    const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
-    const yr = parseInt(h.year, 10);
-    aoa.push([
-      Number.isFinite(yr) ? { t: 'n', v: yr } : { v: "" },
+  const toNum = v => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  for (const h of hist) {
+    rows.push([
+      Number.isFinite(parseInt(h.year,10)) ? parseInt(h.year,10) : "",
       toNum(h.bid),
       toNum(h.actual),
-      { f: `IF(OR(${B}="",${C}="",${B}=0),"",(${C}-${B})/${B})` },
+      null, // calc below
       toNum(h.bidPrice),
-      { f: `IF(${C}="", "", ${C}*$E$2)` },
-      { f: `IF(OR(${E}="", ${F}=""), "", ${E}-${F})` }
-    ]);
-  });
-
-  // Add 20 blank rows for future entries
-  for (let i = 1; i <= 20; i++) {
-    const r = aoa.length + 1;
-    const B = `B${r}`, C = `C${r}`, E = `E${r}`, F = `F${r}`;
-    aoa.push([
-      "",
-      null,
-      null,
-      { f: `IF(OR(${B}="",${C}="",${B}=0),"",(${C}-${B})/${B})` },
-      null,
-      { f: `IF(${C}="", "", ${C}*$E$2)` },
-      { f: `IF(OR(${E}="", ${F}=""), "", ${E}-${F})` }
+      null, // calc below
+      null  // calc below
     ]);
   }
+  // 20 blank input rows for future entries
+  for (let i=0;i<20;i++){
+    rows.push(["", null, null, null, null, null, null]);
+  }
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws.addRows(rows);
 
   // ====== FORMATTING ======
-  // Number formats for %, currency
-  const rng = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = 7; R <= rng.e.r; R++) {
-    const D = XLSX.utils.encode_cell({ r: R, c: 3 });
-    const E = XLSX.utils.encode_cell({ r: R, c: 4 });
-    const F = XLSX.utils.encode_cell({ r: R, c: 5 });
-    const G = XLSX.utils.encode_cell({ r: R, c: 6 });
-    if (ws[D]) ws[D].z = "0.0%";
-    if (ws[E]) ws[E].z = "$#,##0.00";
-    if (ws[F]) ws[F].z = "$#,##0.00";
-    if (ws[G]) ws[G].z = "$#,##0.00";
-  }
+  ws.getCell("A1").font = { bold: true, size: 14 };
+  ["A2","A3","A4","A5","D2"].forEach(a => { ws.getCell(a).font = { bold: true }; });
+  ["A8","B8","C8","D8","E8","F8","G8"].forEach(a => { ws.getCell(a).font = { bold: true }; });
 
-  // Title + labels styling
-  ws["A1"] && (ws["A1"].s = { font: { bold: true, sz: 14 } });
-  ["A2","A3","A4","A5","D2"].forEach(c => { if(ws[c]) ws[c].s = { font: { bold: true } }; });
-  // Header row (row 8)
-  ["A8","B8","C8","D8","E8","F8","G8"].forEach(c => { if (ws[c]) ws[c].s = { font: { bold: true } }; });
+  ws.mergeCells("B5:G5");
+  ws.getCell("B5").alignment = { wrapText: true, vertical: "top" };
+  ws.getRow(1).height = 22;
+  ws.getRow(2).height = 18;
+  ws.getRow(3).height = 18;
+  ws.getRow(4).height = 18;
+  ws.getRow(5).height = 60;
 
-  // Merge Notes (B5:G5) and make it tall + wrapped
-  ws['!merges'] = ws['!merges'] || [];
-  ws['!merges'].push({ s: { r:4, c:1 }, e: { r:4, c:6 } });
-  if (!ws['B5']) ws['B5'] = { t: 's', v: item.notes || "" };
-  ws['B5'].s = { alignment: { wrapText: true, vertical: "top" } };
-
-  // Column widths
-  ws["!cols"] = [
-    { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 10 },
-    { wch: 14 }, { wch: 14 }, { wch: 14 }
+  ws.columns = [
+    { key:"A", width:14 },
+    { key:"B", width:12 },
+    { key:"C", width:12 },
+    { key:"D", width:10 },
+    { key:"E", width:14 },
+    { key:"F", width:14 },
+    { key:"G", width:14 }
   ];
 
-  // Row heights
-  ws['!rows'] = ws['!rows'] || [];
-  ws['!rows'][0] = { hpt: 22 };
-  ws['!rows'][1] = { hpt: 18 };
-  ws['!rows'][2] = { hpt: 18 };
-  ws['!rows'][3] = { hpt: 18 };
-  ws['!rows'][4] = { hpt: 60 };
+  // Fill formulas + number formats starting at row 9 (header is row 8)
+  const lastRow = ws.rowCount;
+  for (let r=9; r<=lastRow; r++){
+    const B = ws.getCell(`B${r}`), C = ws.getCell(`C${r}`),
+          D = ws.getCell(`D${r}`), E = ws.getCell(`E${r}`),
+          F = ws.getCell(`F${r}`), G = ws.getCell(`G${r}`);
 
-  // ====== CONDITIONAL FORMATTING (Add BEFORE protection) ======
-  // These entries are consumed by Excel; SheetJS passes them through.
-  if (!ws['!condfmt']) ws['!condfmt'] = [];
+    // D: percent delta
+    D.value = { formula: `IF(OR(${B.address}="",${C.address}="",${B.address}=0),"",(${C.address}-${B.address})/${B.address})` };
+    // F: Actual Price = Actual Hrs * $E$2 (Rate/hr)
+    F.value = { formula: `IF(${C.address}="", "", ${C.address}*$E$2)` };
+    // G: Gain/Loss = Bid Price - Actual Price
+    G.value = { formula: `IF(OR(${E.address}="", ${F.address}=""), "", ${E.address}-${F.address})` };
 
+    // formats
+    D.numFmt = '0.0%';
+    E.numFmt = '$#,##0.00';
+    F.numFmt = '$#,##0.00';
+    G.numFmt = '$#,##0.00';
+  }
+
+  // ====== CONDITIONAL FORMATTING (before protection) ======
   // D9:D29 — >0 red, <0 green
-  ws['!condfmt'].push({
-    ref: 'D9:D29',
+  ws.addConditionalFormatting({
+    ref: "D9:D29",
     rules: [
-      { type: 'cellIs', operator: 'greaterThan', formula: ['0'], style: { font: { color: { rgb: "FF0000" } } } },
-      { type: 'cellIs', operator: 'lessThan',    formula: ['0'], style: { font: { color: { rgb: "00B050" } } } }
+      { type: "cellIs", operator: "greaterThan", formulae: ["0"], style: { font: { color: { argb: "FFFF0000" } } } },
+      { type: "cellIs", operator: "lessThan",    formulae: ["0"], style: { font: { color: { argb: "FF00B050" } } } }
     ]
   });
-
   // G9:G29 — >0 green, <0 red
-  ws['!condfmt'].push({
-    ref: 'G9:G29',
+  ws.addConditionalFormatting({
+    ref: "G9:G29",
     rules: [
-      { type: 'cellIs', operator: 'greaterThan', formula: ['0'], style: { font: { color: { rgb: "00B050" } } } },
-      { type: 'cellIs', operator: 'lessThan',    formula: ['0'], style: { font: { color: { rgb: "FF0000" } } } }
+      { type: "cellIs", operator: "greaterThan", formulae: ["0"], style: { font: { color: { argb: "FF00B050" } } } },
+      { type: "cellIs", operator: "lessThan",    formulae: ["0"], style: { font: { color: { argb: "FFFF0000" } } } }
     ]
   });
 
   // ====== PROTECTION + UNLOCK SPECIFIC RANGES ======
-  // Helper: ensure a cell exists and mark it unlocked
-  function unlockCell(addr) {
-    if (!ws[addr]) ws[addr] = { t: 's', v: "" };
-    ws[addr].s = ws[addr].s || {};
-    ws[addr].s.protection = { locked: false };
-  }
-
-  // Helper: unlock an A1-style range
-  function unlockRange(a1) {
-    const r = XLSX.utils.decode_range(a1);
-    for (let R = r.s.r; R <= r.e.r; ++R) {
-      for (let C = r.s.c; C <= r.e.c; ++C) {
-        unlockCell(XLSX.utils.encode_cell({ r: R, c: C }));
+  function unlockRange(a1){
+    const m = a1.match(/^([A-Z]+)(\\d+):([A-Z]+)(\\d+)$/i);
+    if (!m) { ws.getCell(a1).protection = { locked: false }; return; }
+    const [_, c1, r1, c2, r2] = m;
+    const colStart = columnToNumber(c1);
+    const colEnd   = columnToNumber(c2);
+    for (let R=+r1; R<=+r2; R++){
+      for (let C=colStart; C<=colEnd; C++){
+        ws.getCell(numberToColumn(C)+R).protection = { locked: false };
       }
     }
   }
+  function columnToNumber(col){ let n=0; for (let i=0;i<col.length;i++){ n = n*26 + (col.charCodeAt(i)-64); } return n; }
+  function numberToColumn(num){ let s=""; while(num>0){ const r=(num-1)%26; s=String.fromCharCode(65+r)+s; num=Math.floor((num-1)/26); } return s; }
 
   // Your editable areas:
   unlockRange("A9:C31");
   unlockRange("E9:E33");
-  unlockCell("B2");
+  ws.getCell("B2").protection = { locked: false };
   unlockRange("B3:G5");
 
-  // Turn on sheet protection (optional password available)
-  ws['!protect'] = {
+  // Protect sheet (no password). Users can edit unlocked cells immediately.
+  await ws.protect("", {
     selectLockedCells: true,
     selectUnlockedCells: true,
     formatCells: false,
@@ -930,12 +924,9 @@
     sort: false,
     autoFilter: false,
     pivotTables: false
-    // password: "yourPassword" // <— set if desired
-  };
-
-  return ws;
+    // password: "yourPassword" // optional
+  });
 }
-
     
     function buildCompletedSummaryHTML(item) {
       const HOURLY_RATE = 25;
